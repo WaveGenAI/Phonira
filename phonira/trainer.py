@@ -105,7 +105,7 @@ args.add_argument(
 args.add_argument(
     "--padding_value",
     type=int,
-    default=1025,
+    default=1024,
     help="Padding value for the collate function",
 )
 args.add_argument(
@@ -179,7 +179,7 @@ for epoch in range(args.epochs):
         x, padding_mask = batch
 
         with accelerator.accumulate(model):
-            loss, _ = model(x, training=True)
+            _, loss = model(x, training=True)
             accelerator.backward(loss)
 
             if accelerator.sync_gradients:

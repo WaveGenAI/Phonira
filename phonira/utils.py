@@ -144,7 +144,7 @@ def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
     return out[:, :, : n - cdbk]
 
 
-def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025):
+def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1024):
     """Collate function.
 
     Args:
