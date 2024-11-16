@@ -160,7 +160,10 @@ def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025)
         ]
         # apply the delay pattern and remove the batch dimension (useless in every case because it correspond to the channel
         # so when delay pattern is applied, there is alway only one channel, for stereo and mono)
-        codes = [delay_pattern(code, padding_value).squeeze(0) for code in codes]
+        codes = [
+            delay_pattern(code, padding_value).squeeze(0)[:num_quantizers, :]
+            for code in codes
+        ]
 
         # create the padding mask
         lengths = torch.tensor([code.shape[-1] for code in codes])
