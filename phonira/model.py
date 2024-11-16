@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class Phonira(torch.nn.Module):
+class Phonira(nn.Module):
     def __init__(self, num_quantizers: int, codebook_size: int, hidden_size: int):
         super().__init__()
 
@@ -38,7 +38,6 @@ class Phonira(torch.nn.Module):
 
         if training:
             # compute cross entropy loss for each quantizer
-
             loss_fc = nn.CrossEntropyLoss()
 
             loss = 0

@@ -170,6 +170,7 @@ model_dac = dac.DAC.load(model_path)
 model_dac.to(accelerator.device)
 
 start_traing_time = time.time()
+avg_loss = 0
 for epoch in range(args.epochs):
     for i, batch in enumerate(training_dataloader):
         # if dataset size is provided, break the loop when the dataset size is reached
@@ -182,17 +183,20 @@ for epoch in range(args.epochs):
             _, loss = model(x, training=True)
             accelerator.backward(loss)
 
+            avg_loss += loss.item()
             if accelerator.sync_gradients:
                 accelerator.clip_grad_norm_(model.parameters(), args.gradient_clip_val)
                 scheduler.step()
 
+                avg_loss /= args.gradient_accumulation_steps
+                accelerator.print(
+                    f"Epoch {epoch}, step {i}, loss: {avg_loss} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {round(scheduler.get_last_lr()[0], 2)}",
+                    end="\r",
+                )
+                avg_loss = 0
+
             optimizer.step()
             optimizer.zero_grad()
-
-        accelerator.print(
-            f"Epoch {epoch}, step {i}, loss: {loss.item()} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {scheduler.get_last_lr()[0]}",
-            end="\r",
-        )
 
         # logging section
         accelerator.log({"train_loss": loss.item(), "lr": scheduler.get_last_lr()[0]})
