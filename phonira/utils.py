@@ -4,6 +4,7 @@ import os
 import torch
 import webdataset as wds
 from datasets import load_dataset
+from einops import rearrange
 
 
 def skip_small_samples(input_key: str, size: int):
@@ -71,22 +72,6 @@ def load_webdataset(
     return dataset
 
 
-def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025):
-    """Collate function.
-
-    Args:
-        num_quantizers (int): the number of quantizers to return
-        column_code (str): the column name that contains the codebooks codes of the audio codec
-    """
-
-    def _collate_fn(samples):
-        codes = [torch.tensor(item[column_code], dtype=torch.long) for item in samples]
-        print(codes[0].shape)
-        return codes
-
-    return _collate_fn
-
-
 def delay_pattern(x: torch.Tensor, padding_value: int = 1025) -> torch.Tensor:
     """Delay pattern.
 
@@ -109,6 +94,34 @@ def delay_pattern(x: torch.Tensor, padding_value: int = 1025) -> torch.Tensor:
     return out
 
 
+def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
+    """
+    Args:
+      lengths:
+        A 1-D tensor containing sentence lengths.
+      max_len:
+        The length of masks.
+    Returns:
+      Return a 2-D bool tensor, where masked positions
+      are filled with `True` and non-masked positions are
+      filled with `False`.
+
+    >>> lengths = torch.tensor([1, 3, 2, 5])
+    >>> make_pad_mask(lengths)
+    tensor([[False,  True,  True,  True,  True],
+            [False, False, False,  True,  True],
+            [False, False,  True,  True,  True],
+            [False, False, False, False, False]])
+    """
+    assert lengths.ndim == 1, lengths.ndim
+    max_len = max(max_len, lengths.max())
+    n = lengths.size(0)
+    seq_range = torch.arange(0, max_len, device=lengths.device)
+    expaned_lengths = seq_range.unsqueeze(0).expand(n, max_len)
+
+    return expaned_lengths < lengths.unsqueeze(-1)
+
+
 def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
     """Reverse delay pattern.
 
@@ -129,3 +142,36 @@ def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
         out[:, k, : n - k] = x[:, k, k:n]
 
     return out[:, :, : n - cdbk]
+
+
+def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025):
+    """Collate function.
+
+    Args:
+        num_quantizers (int): the number of quantizers to return
+        column_code (str): the column name that contains the codebooks codes of the audio codec
+    """
+
+    def _collate_fn(samples):
+        # convert the codes to tensors and get the first channel
+        codes = [
+            torch.tensor(item[column_code], dtype=torch.long)[:1, :, :]
+            for item in samples
+        ]
+        # apply the delay pattern and remove the batch dimension (useless in every case because it correspond to the channel
+        # so when delay pattern is applied, there is alway only one channel, for stereo and mono)
+        codes = [delay_pattern(code, padding_value).squeeze(0) for code in codes]
+
+        # create the padding mask
+        lengths = torch.tensor([code.shape[-1] for code in codes])
+        padding_maks = make_pad_mask(lengths, max_len=max(lengths))
+
+        codes_stacked = [rearrange(code, "k n -> n k") for code in codes]
+        codes_stacked = torch.nn.utils.rnn.pad_sequence(
+            codes_stacked, padding_value=padding_value
+        )
+        codes_stacked = rearrange(codes_stacked, "n b k -> b k n")
+
+        return codes_stacked, padding_maks
+
+    return _collate_fn

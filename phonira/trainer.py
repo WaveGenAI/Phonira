@@ -103,7 +103,7 @@ args.add_argument(
     help="Gradient clipping value",
 )
 args.add_argument(
-    "--paddding_value",
+    "--padding_value",
     type=int,
     default=1025,
     help="Padding value for the collate function",
@@ -160,8 +160,10 @@ for epoch in range(args.epochs):
         if (i + 1) * args.batch_size > args.dataset_size:
             break
 
+        x, padding_mask = batch
+
         with accelerator.accumulate(model):
-            loss, _ = model(batch, training=True)
+            loss, _ = model(x, training=True)
             continue
             accelerator.backward(loss)
 
