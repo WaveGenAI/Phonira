@@ -71,7 +71,7 @@ def load_webdataset(
     return dataset
 
 
-def collate_fn(num_quantizers: int, column_code: str):
+def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025):
     """Collate function.
 
     Args:
@@ -81,6 +81,51 @@ def collate_fn(num_quantizers: int, column_code: str):
 
     def _collate_fn(samples):
         codes = [torch.tensor(item[column_code], dtype=torch.long) for item in samples]
+        print(codes[0].shape)
         return codes
 
     return _collate_fn
+
+
+def delay_pattern(x: torch.Tensor, padding_value: int = 1025) -> torch.Tensor:
+    """Delay pattern.
+
+    Args:
+        x (torch.Tensor): the input tensor
+        padding_value (int, optional): the padding value. Defaults to 1025.
+
+    Returns:
+        torch.Tensor: the delayed pattern tensor
+    """
+
+    b, cdbk, n = x.shape
+    assert b == 1, "Batch size must be 1, otherwise use stereo delay pattern"
+
+    out = torch.full_like(x, padding_value)
+
+    for k in range(cdbk):
+        out[:, k, k:n] = x[:, k, : n - k]
+
+    return out
+
+
+def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
+    """Reverse delay pattern.
+
+    Args:
+        x (torch.Tensor): the input tensor
+
+    Returns:
+        torch.Tensor: the reversed delay pattern tensor
+    """
+
+    b, cdbk, n = x.shape
+    assert b == 1, "Batch size must be 1, otherwise use stereo delay pattern"
+    assert cdbk <= n, "The codebook size must be less than the sequence size"
+
+    out = torch.full_like(x, 1025)
+
+    for k in range(cdbk):
+        out[:, k, : n - k] = x[:, k, k:n]
+
+    return out[:, :, : n - cdbk]

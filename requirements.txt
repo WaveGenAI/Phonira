@@ -4,3 +4,4 @@ webdataset
 datasets
 soundstorm-pytorch
 descript-audio-codec
+pytest

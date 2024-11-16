@@ -102,6 +102,12 @@ args.add_argument(
     default=0.5,
     help="Gradient clipping value",
 )
+args.add_argument(
+    "--paddding_value",
+    type=int,
+    default=1025,
+    help="Padding value for the collate function",
+)
 args = args.parse_args()
 
 dataset = load_webdataset(
@@ -114,7 +120,7 @@ training_dataloader = DataLoader(
     dataset,
     batch_size=args.batch_size,
     num_workers=os.cpu_count(),
-    collate_fn=collate_fn(args.num_quantizers, args.column_code),
+    collate_fn=collate_fn(args.num_quantizers, args.column_code, args.padding_value),
 )
 
 
@@ -156,6 +162,7 @@ for epoch in range(args.epochs):
 
         with accelerator.accumulate(model):
             loss, _ = model(batch, training=True)
+            continue
             accelerator.backward(loss)
 
             if accelerator.sync_gradients:
