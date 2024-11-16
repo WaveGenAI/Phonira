@@ -108,6 +108,18 @@ args.add_argument(
     default=1025,
     help="Padding value for the collate function",
 )
+args.add_argument(
+    "--codebook_size",
+    type=int,
+    default=1025,
+    help="The number of codebooks of the audio codec",
+)
+args.add_argument(
+    "--hidden_size",
+    type=int,
+    default=1024,
+    help="The hidden size of the model",
+)
 args = args.parse_args()
 
 dataset = load_webdataset(
@@ -124,7 +136,11 @@ training_dataloader = DataLoader(
 )
 
 
-model = Phonira()
+model = Phonira(
+    num_quantizers=args.num_quantizers,
+    codebook_size=args.codebook_size,
+    hidden_size=args.hidden_size,
+)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=args.betas, eps=1e-8)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -164,7 +180,6 @@ for epoch in range(args.epochs):
 
         with accelerator.accumulate(model):
             loss, _ = model(x, training=True)
-            continue
             accelerator.backward(loss)
 
             if accelerator.sync_gradients:

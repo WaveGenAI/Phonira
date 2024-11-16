@@ -158,6 +158,12 @@ def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1025)
             torch.tensor(item[column_code], dtype=torch.long)[:1, :, :]
             for item in samples
         ]
+
+        # add padding to the start of the codes like a <sos> token
+        sos_token = torch.full_like(codes[0][..., :1], padding_value)
+
+        codes = [torch.cat([sos_token, code], dim=-1) for code in codes]
+
         # apply the delay pattern and remove the batch dimension (useless in every case because it correspond to the channel
         # so when delay pattern is applied, there is alway only one channel, for stereo and mono)
         codes = [
