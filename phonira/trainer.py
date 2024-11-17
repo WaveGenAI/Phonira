@@ -120,6 +120,12 @@ args.add_argument(
     default=1024,
     help="The hidden size of the model",
 )
+args.add_argument(
+    "--depth",
+    type=int,
+    default=6,
+    help="The depth of the model",
+)
 args = args.parse_args()
 
 dataset = load_webdataset(
@@ -140,6 +146,7 @@ model = Phonira(
     num_quantizers=args.num_quantizers,
     codebook_size=args.codebook_size,
     hidden_size=args.hidden_size,
+    depth=args.depth,
     padding_token=args.padding_value,
 )
 

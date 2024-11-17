@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
+from rotary_embedding_torch import RotaryEmbedding
 from torch.nn import functional as F
 
 
@@ -19,6 +20,31 @@ class RMSNorm(nn.Module):
         return x
 
 
+class SwiGLU(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+
+        self.w1 = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        x = F.silu(x)
+        return x * self.w1(x)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim: int, ff_dim: int):
+        super().__init__()
+        self.w1 = nn.Linear(dim, ff_dim)
+        self.w2 = nn.Linear(ff_dim, dim)
+
+        self._swiglu = SwiGLU(ff_dim)
+
+    def forward(self, x):
+        x = self.w1(x)
+        x = self._swiglu(x)
+        return self.w2(x)
+
+
 class MultiHeadAttention(nn.Module):
     """MultiHeadAttention from https://arxiv.org/pdf/1706.03762"""
 
@@ -29,11 +55,11 @@ class MultiHeadAttention(nn.Module):
         self.w_v = nn.Linear(hidden_size, hidden_size)
 
         self.w_out = nn.Linear(hidden_size, hidden_size)
-
+        self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
         self.num_heads = num_heads
 
     def forward(
-        self, x_q, x_k, x_v, padding_mask: torch.Tensor = None, is_causal: bool = True
+        self, x_q, x_k, x_v, padding_mask: torch.Tensor = None, is_causal: bool = False
     ):
         q = self.w_q(x_q)
         k = self.w_k(x_k)
@@ -42,6 +68,10 @@ class MultiHeadAttention(nn.Module):
         q_head = rearrange(q, "b n (h d) -> b h n d", h=self.num_heads)
         k_head = rearrange(k, "b n (h d) -> b h n d", h=self.num_heads)
         v_head = rearrange(v, "b n (h d) -> b h n d", h=self.num_heads)
+
+        # apply rotary embeddings
+        q_head = self.rotary_emb.rotate_queries_or_keys(q_head)
+        k_head = self.rotary_emb.rotate_queries_or_keys(k_head)
 
         b, _, n, _ = q_head.shape
 
@@ -74,13 +104,15 @@ class DecoderBlock(nn.Module):
         self.rms2 = RMSNorm(hidden_size)
 
         self.mha = MultiHeadAttention(hidden_size, 8)
+        self.feed_forward = FeedForward(hidden_size, hidden_size * 2)
 
     def forward(self, x, padding_mask: torch.Tensor = None):
         x_norm = self.rms1(x)
         x = self.mha(x_norm, x_norm, x_norm, padding_mask=padding_mask)
-
         x = x + x_norm
 
+        x_norm = self.rms2(x)
+        x = x + self.feed_forward(x_norm)
         return x
 
 
@@ -90,6 +122,7 @@ class Phonira(nn.Module):
         num_quantizers: int,
         codebook_size: int,
         hidden_size: int,
+        depth: int,
         padding_token: int,
     ):
         super().__init__()
@@ -103,12 +136,14 @@ class Phonira(nn.Module):
         )
 
         self.decoder_blocks = nn.ModuleList(
-            [DecoderBlock(hidden_size) for _ in range(1)]
+            [DecoderBlock(hidden_size) for _ in range(depth)]
         )
 
         self.heads = nn.ModuleList(
             [nn.Linear(hidden_size, codebook_size) for _ in range(num_quantizers)]
         )
+
+        self.rms = RMSNorm(hidden_size)
 
     def forward(self, x, padding_mask: torch.Tensor = None, training=False):
         assert x.shape[1] == len(
@@ -123,6 +158,8 @@ class Phonira(nn.Module):
 
         for block in self.decoder_blocks:
             x = block(x, padding_mask=padding_mask[..., :-1])
+
+        x = self.rms(x)
 
         x = torch.stack([head(x) for head in self.heads], dim=1)
 
