@@ -5,6 +5,7 @@ import torch
 import webdataset as wds
 from datasets import load_dataset
 from einops import rearrange
+from huggingface_hub import get_token
 
 
 def skip_small_samples(input_key: str, size: int):

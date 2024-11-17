@@ -125,7 +125,7 @@ args = args.parse_args()
 dataset = load_webdataset(
     args.dataset,
     args.split,
-    map_func=skip_small_samples(args.column_code, args.num_quantizers),
+    map_func=skip_small_samples(args.column_code, max(args.num_quantizers, 20)),
 )
 
 training_dataloader = DataLoader(
@@ -171,6 +171,7 @@ model_dac.to(accelerator.device)
 
 start_traing_time = time.time()
 avg_loss = 0
+
 for epoch in range(args.epochs):
     for i, batch in enumerate(training_dataloader):
         # if dataset size is provided, break the loop when the dataset size is reached
@@ -190,7 +191,7 @@ for epoch in range(args.epochs):
 
                 avg_loss /= args.gradient_accumulation_steps
                 accelerator.print(
-                    f"Epoch {epoch}, step {i}, loss: {avg_loss} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {round(scheduler.get_last_lr()[0], 2)}",
+                    f"Epoch {epoch}, step {i}, loss: {avg_loss} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {round(scheduler.get_last_lr()[0], 7)}",
                     end="\r",
                 )
                 avg_loss = 0
