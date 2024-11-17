@@ -20,28 +20,18 @@ class RMSNorm(nn.Module):
         return x
 
 
-class SwiGLU(nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-
-        self.w1 = nn.Linear(dim, dim)
-
-    def forward(self, x):
-        x = F.silu(x)
-        return x * self.w1(x)
-
-
-class FeedForward(nn.Module):
+class FFNSwiGLU(nn.Module):
     def __init__(self, dim: int, ff_dim: int):
         super().__init__()
         self.w1 = nn.Linear(dim, ff_dim)
         self.w2 = nn.Linear(ff_dim, dim)
 
-        self._swiglu = SwiGLU(ff_dim)
+        self.v = nn.Linear(dim, ff_dim)
 
     def forward(self, x):
-        x = self.w1(x)
-        x = self._swiglu(x)
+        vx = self.v(x)
+
+        x = F.silu(self.w1(x)) * vx
         return self.w2(x)
 
 
@@ -104,7 +94,10 @@ class DecoderBlock(nn.Module):
         self.rms2 = RMSNorm(hidden_size)
 
         self.mha = MultiHeadAttention(hidden_size, 8)
-        self.feed_forward = FeedForward(hidden_size, hidden_size * 4)
+
+        ff_dim = int((hidden_size * 4) * (2 / 3))
+
+        self.feed_forward = FFNSwiGLU(hidden_size, ff_dim)
 
     def forward(self, x, padding_mask: torch.Tensor = None):
         x_bis = self.rms1(x)
