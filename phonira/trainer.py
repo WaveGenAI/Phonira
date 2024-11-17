@@ -93,7 +93,7 @@ args.add_argument(
 args.add_argument(
     "--log_interval",
     type=int,
-    default=1000,
+    default=100,
     help="Log interval",
 )
 args.add_argument(
@@ -125,6 +125,11 @@ args.add_argument(
     type=int,
     default=6,
     help="The depth of the model",
+)
+args.add_argument(
+    "--model_path",
+    type=str,
+    help="Path to the model checkpoint to resume training",
 )
 args = args.parse_args()
 
@@ -165,13 +170,15 @@ accelerator = Accelerator(
 )
 accelerator.init_trackers(project_name=args.project_name, config=vars(args))
 
-
 model, optimizer, training_dataloader, scheduler = accelerator.prepare(
     model, optimizer, training_dataloader, scheduler
 )
 
-model.train()
+accelerator.register_for_checkpointing(scheduler)
+if args.model_path:
+    accelerator.load_state(args.model_path)
 
+model.train()
 
 model_path = dac.utils.download(model_type="44khz")
 model_dac = dac.DAC.load(model_path)
@@ -199,7 +206,7 @@ for epoch in range(args.epochs):
 
                 avg_loss /= args.gradient_accumulation_steps
                 accelerator.print(
-                    f"Epoch {epoch}, step {i}, loss: {avg_loss} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {round(scheduler.get_last_lr()[0], 7)}",
+                    f"Epoch {epoch}, step {i//args.gradient_accumulation_steps}, loss: {avg_loss} ({round((i+1)/(time.time() - start_traing_time), 2)} s/step), lr: {round(scheduler.get_last_lr()[0], 7)}",
                     end="\r",
                 )
                 avg_loss = 0
@@ -209,7 +216,7 @@ for epoch in range(args.epochs):
 
         # logging section
         accelerator.log({"train_loss": loss.item(), "lr": scheduler.get_last_lr()[0]})
-        if i % args.log_interval == 0:
+        if (i // args.gradient_accumulation_steps) % args.log_interval == 0:
             accelerator.save_state(output_dir=args.output_dir)
 
 accelerator.end_training()

@@ -107,12 +107,12 @@ class DecoderBlock(nn.Module):
         self.feed_forward = FeedForward(hidden_size, hidden_size * 4)
 
     def forward(self, x, padding_mask: torch.Tensor = None):
-        x_norm = self.rms1(x)
-        x = self.mha(x_norm, x_norm, x_norm, padding_mask=padding_mask)
-        x = x + x_norm
+        x_bis = self.rms1(x)
+        x_bis = self.mha(x_bis, x_bis, x_bis, padding_mask=padding_mask)
+        x = x + x_bis
 
-        x_norm = self.rms2(x)
-        x = x + self.feed_forward(x_norm)
+        x_bis = self.rms2(x)
+        x = x + self.feed_forward(x_bis)
         return x
 
 
