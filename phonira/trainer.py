@@ -111,13 +111,13 @@ args.add_argument(
 args.add_argument(
     "--codebook_size",
     type=int,
-    default=1025,
+    default=1024,
     help="The number of codebooks of the audio codec",
 )
 args.add_argument(
     "--hidden_size",
     type=int,
-    default=1024,
+    default=512,
     help="The hidden size of the model",
 )
 args.add_argument(

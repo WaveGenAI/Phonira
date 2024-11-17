@@ -104,7 +104,7 @@ class DecoderBlock(nn.Module):
         self.rms2 = RMSNorm(hidden_size)
 
         self.mha = MultiHeadAttention(hidden_size, 8)
-        self.feed_forward = FeedForward(hidden_size, hidden_size * 2)
+        self.feed_forward = FeedForward(hidden_size, hidden_size * 4)
 
     def forward(self, x, padding_mask: torch.Tensor = None):
         x_norm = self.rms1(x)
