@@ -140,6 +140,7 @@ model = Phonira(
     num_quantizers=args.num_quantizers,
     codebook_size=args.codebook_size,
     hidden_size=args.hidden_size,
+    padding_token=args.padding_value,
 )
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=args.betas, eps=1e-8)
@@ -181,7 +182,7 @@ for epoch in range(args.epochs):
         x, padding_mask = batch
 
         with accelerator.accumulate(model):
-            _, loss = model(x, training=True)
+            _, loss = model(x, padding_mask=padding_mask, training=True)
             accelerator.backward(loss)
 
             avg_loss += loss.item()
