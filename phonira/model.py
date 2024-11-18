@@ -21,24 +21,27 @@ class RMSNorm(nn.Module):
 
 
 class FFNSwiGLU(nn.Module):
-    def __init__(self, dim: int, ff_dim: int):
+    def __init__(self, dim: int, ff_dim: int, dropout_p: float = 0.1):
         super().__init__()
         self.w1 = nn.Linear(dim, ff_dim, bias=False)
         self.w2 = nn.Linear(ff_dim, dim, bias=False)
 
         self.v = nn.Linear(dim, ff_dim, bias=False)
 
+        self.dropout = nn.Dropout(dropout_p)
+
     def forward(self, x):
         vx = self.v(x)
 
         x = F.silu(self.w1(x)) * vx
+        x = self.dropout(x)
         return self.w2(x)
 
 
 class MultiHeadAttention(nn.Module):
     """MultiHeadAttention from https://arxiv.org/pdf/1706.03762"""
 
-    def __init__(self, hidden_size: int, num_heads: int):
+    def __init__(self, hidden_size: int, num_heads: int, dropout_p: float = 0.1):
         super().__init__()
         self.w_q = nn.Linear(hidden_size, hidden_size, bias=False)
         self.w_k = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -47,6 +50,7 @@ class MultiHeadAttention(nn.Module):
         self.w_out = nn.Linear(hidden_size, hidden_size, bias=False)
         self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
         self.num_heads = num_heads
+        self.dropout_p = dropout_p
 
     def forward(
         self, x_q, x_k, x_v, padding_mask: torch.Tensor = None, is_causal: bool = False
@@ -76,8 +80,12 @@ class MultiHeadAttention(nn.Module):
             padding_mask = padding_mask.expand(b, 1, n, n)
             attention_mask = attention_mask & padding_mask
 
+        dropout_p = 0
+        if self.training:
+            dropout_p = self.dropout_p
+
         attention = F.scaled_dot_product_attention(
-            q_head, k_head, v_head, attn_mask=attention_mask
+            q_head, k_head, v_head, attn_mask=attention_mask, dropout_p=dropout_p
         )
 
         out = rearrange(attention, "b h n d -> b n (h d)")
@@ -87,25 +95,29 @@ class MultiHeadAttention(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, hidden_size: int):
+    def __init__(self, hidden_size: int, num_head: int = 8, dropout_p: float = 0.1):
         super().__init__()
 
         self.rms1 = RMSNorm(hidden_size)
         self.rms2 = RMSNorm(hidden_size)
 
-        self.mha = MultiHeadAttention(hidden_size, 8)
+        self.dropout = nn.Dropout(dropout_p)
+
+        self.mha = MultiHeadAttention(hidden_size, num_head, dropout_p)
 
         ff_dim = int((hidden_size * 4) * (2 / 3))
-
-        self.feed_forward = FFNSwiGLU(hidden_size, ff_dim)
+        self.feed_forward = FFNSwiGLU(hidden_size, ff_dim, dropout_p)
 
     def forward(self, x, padding_mask: torch.Tensor = None):
         x_bis = self.rms1(x)
         x_bis = self.mha(x_bis, x_bis, x_bis, padding_mask=padding_mask, is_causal=True)
+        x_bis = self.dropout(x_bis)
         x = x + x_bis
 
         x_bis = self.rms2(x)
-        x = x + self.feed_forward(x_bis)
+        x_bis = self.feed_forward(x_bis)
+        x_bis = self.dropout(x_bis)
+        x = x + x_bis
         return x
 
 
@@ -117,6 +129,7 @@ class Phonira(nn.Module):
         hidden_size: int,
         depth: int,
         padding_token: int,
+        dropout_p: float = 0.1,
     ):
         super().__init__()
         self._pad_token = padding_token
@@ -129,7 +142,7 @@ class Phonira(nn.Module):
         )
 
         self.decoder_blocks = nn.ModuleList(
-            [DecoderBlock(hidden_size) for _ in range(depth)]
+            [DecoderBlock(hidden_size, dropout_p=dropout_p) for _ in range(depth)]
         )
 
         self.heads = nn.ModuleList(
@@ -140,6 +153,7 @@ class Phonira(nn.Module):
         )
 
         self.rms = RMSNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, x, padding_mask: torch.Tensor = None, training=False):
         assert x.shape[1] == len(
@@ -151,6 +165,7 @@ class Phonira(nn.Module):
             x = x[..., :-1]
 
         x = sum([embd(x[:, i, :]) for i, embd in enumerate(self.embeddings)])
+        x = self.dropout(x)
 
         for block in self.decoder_blocks:
             x = block(x, padding_mask=padding_mask[..., :-1])
