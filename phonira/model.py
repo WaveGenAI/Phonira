@@ -23,10 +23,10 @@ class RMSNorm(nn.Module):
 class FFNSwiGLU(nn.Module):
     def __init__(self, dim: int, ff_dim: int):
         super().__init__()
-        self.w1 = nn.Linear(dim, ff_dim)
-        self.w2 = nn.Linear(ff_dim, dim)
+        self.w1 = nn.Linear(dim, ff_dim, bias=False)
+        self.w2 = nn.Linear(ff_dim, dim, bias=False)
 
-        self.v = nn.Linear(dim, ff_dim)
+        self.v = nn.Linear(dim, ff_dim, bias=False)
 
     def forward(self, x):
         vx = self.v(x)
@@ -40,11 +40,11 @@ class MultiHeadAttention(nn.Module):
 
     def __init__(self, hidden_size: int, num_heads: int):
         super().__init__()
-        self.w_q = nn.Linear(hidden_size, hidden_size)
-        self.w_k = nn.Linear(hidden_size, hidden_size)
-        self.w_v = nn.Linear(hidden_size, hidden_size)
+        self.w_q = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.w_k = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.w_v = nn.Linear(hidden_size, hidden_size, bias=False)
 
-        self.w_out = nn.Linear(hidden_size, hidden_size)
+        self.w_out = nn.Linear(hidden_size, hidden_size, bias=False)
         self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
         self.num_heads = num_heads
 
@@ -101,7 +101,7 @@ class DecoderBlock(nn.Module):
 
     def forward(self, x, padding_mask: torch.Tensor = None):
         x_bis = self.rms1(x)
-        x_bis = self.mha(x_bis, x_bis, x_bis, padding_mask=padding_mask)
+        x_bis = self.mha(x_bis, x_bis, x_bis, padding_mask=padding_mask, is_causal=True)
         x = x + x_bis
 
         x_bis = self.rms2(x)
@@ -133,7 +133,10 @@ class Phonira(nn.Module):
         )
 
         self.heads = nn.ModuleList(
-            [nn.Linear(hidden_size, codebook_size) for _ in range(num_quantizers)]
+            [
+                nn.Linear(hidden_size, codebook_size, bias=False)
+                for _ in range(num_quantizers)
+            ]
         )
 
         self.rms = RMSNorm(hidden_size)
