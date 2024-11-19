@@ -53,7 +53,13 @@ class MultiHeadAttention(nn.Module):
         self.dropout_p = dropout_p
 
     def forward(
-        self, x_q, x_k, x_v, padding_mask: torch.Tensor = None, is_causal: bool = False
+        self,
+        x_q,
+        x_k,
+        x_v,
+        padding_mask: torch.Tensor = None,
+        is_causal: bool = False,
+        start_pos: int = 0,
     ):
         q = self.w_q(x_q)
         k = self.w_k(x_k)
@@ -73,7 +79,13 @@ class MultiHeadAttention(nn.Module):
         attention_mask = torch.ones((b, 1, n, n), device=x_q.device, dtype=torch.bool)
 
         if is_causal:
-            attention_mask = torch.tril(attention_mask)
+            # create a causal mask using the start_pos to avoid masking the prepend tokens
+            pos_token_to_predict = n - start_pos
+            attention_mask[:, :, pos_token_to_predict:, pos_token_to_predict:] = (
+                torch.tril(
+                    attention_mask[:, :, pos_token_to_predict:, pos_token_to_predict:]
+                )
+            )
 
         if padding_mask is not None:
             padding_mask = padding_mask.unsqueeze(1).unsqueeze(1)
@@ -108,9 +120,16 @@ class DecoderBlock(nn.Module):
         ff_dim = int((hidden_size * 4) * (2 / 3))
         self.feed_forward = FFNSwiGLU(hidden_size, ff_dim, dropout_p)
 
-    def forward(self, x, padding_mask: torch.Tensor = None):
+    def forward(self, x, padding_mask: torch.Tensor = None, start_pos: int = 0):
         x_bis = self.rms1(x)
-        x_bis = self.mha(x_bis, x_bis, x_bis, padding_mask=padding_mask, is_causal=True)
+        x_bis = self.mha(
+            x_bis,
+            x_bis,
+            x_bis,
+            padding_mask=padding_mask,
+            is_causal=True,
+            start_pos=start_pos,
+        )
         x_bis = self.dropout(x_bis)
         x = x + x_bis
 
@@ -129,6 +148,7 @@ class Phonira(nn.Module):
         hidden_size: int,
         depth: int,
         padding_token: int,
+        proj_dim: int,
         dropout_p: float = 0.1,
     ):
         super().__init__()
@@ -155,7 +175,19 @@ class Phonira(nn.Module):
         self.rms = RMSNorm(hidden_size)
         self.dropout = nn.Dropout(dropout_p)
 
-    def forward(self, x, padding_mask: torch.Tensor = None, training=False):
+        if proj_dim != hidden_size:
+            self.proj = nn.Linear(proj_dim, hidden_size, bias=False)
+        else:
+            self.proj = nn.Identity()
+
+    def forward(
+        self,
+        x,
+        prepend_embed: torch.Tensor,
+        padding_mask: torch.Tensor = None,
+        prepend_mask: torch.Tensor = None,
+        training=False,
+    ):
         assert x.shape[1] == len(
             self.embeddings
         ), "Input shape mismatch with embeddings"
@@ -164,11 +196,18 @@ class Phonira(nn.Module):
             y = x[..., 1:]
             x = x[..., :-1]
 
+        prepend_embed = self.proj(prepend_embed)
+
         x = sum([embd(x[:, i, :]) for i, embd in enumerate(self.embeddings)])
         x = self.dropout(x)
 
+        # prepend embeddings
+        start_pos = prepend_embed.size(1)
+        padding_mask = torch.cat([prepend_mask, padding_mask], dim=1)
+        x = torch.cat([prepend_embed, x], dim=1)
+
         for block in self.decoder_blocks:
-            x = block(x, padding_mask=padding_mask[..., :-1])
+            x = block(x, padding_mask=padding_mask[..., :-1], start_pos=start_pos)
 
         x = self.rms(x)
 
@@ -180,7 +219,8 @@ class Phonira(nn.Module):
 
             loss = 0
             for i in range(len(self.heads)):
-                logits_loss = x[:, i].flatten(end_dim=1)
+                # get the last token of x (without the prepend token)
+                logits_loss = x[:, i, -y.size(-1) :, :].flatten(end_dim=1)
                 target = y[:, i].flatten()
 
                 # replace padding token with -100

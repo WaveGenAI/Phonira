@@ -145,14 +145,26 @@ def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
     return out[:, :, : n - cdbk]
 
 
-def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1024):
+def collate_fn(
+    num_quantizers: int,
+    column_code: str,
+    column_prompt: str,
+    conditionning_model,
+    tokenizer,
+    padding_value: int = 1024,
+):
     """Collate function.
 
     Args:
         num_quantizers (int): the number of quantizers to return
         column_code (str): the column name that contains the codebooks codes of the audio codec
+        column_prompt (str): the column name that contains the prompt
+        conditionning_model: the conditionning model
+        tokenizer: the tokenizer of the conditionning model
+        padding_value (int, optional): the padding value. Defaults to 1024.
     """
 
+    @torch.no_grad()
     def _collate_fn(samples):
         # convert the codes to tensors and get the first channel
         codes = [
@@ -182,6 +194,26 @@ def collate_fn(num_quantizers: int, column_code: str, padding_value: int = 1024)
         )
         codes_stacked = rearrange(codes_stacked, "n b k -> b k n")
 
-        return codes_stacked, padding_maks
+        # generate the conditionning embeddings
+
+        sentences = [item[column_prompt] for item in samples]
+
+        inputs = tokenizer(
+            [sentence for sentence in sentences],
+            return_tensors="pt",
+            padding=True,
+        )
+
+        output_embeddings = conditionning_model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+        )
+
+        return (
+            codes_stacked,
+            padding_maks,
+            output_embeddings.last_hidden_state,
+            inputs["attention_mask"].bool(),
+        )
 
     return _collate_fn

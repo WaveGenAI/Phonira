@@ -9,6 +9,7 @@ from audiotools import AudioSignal
 from einops import rearrange
 from model import Phonira
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, T5EncoderModel
 from utils import collate_fn, load_webdataset, skip_small_samples
 
 args = ArgumentParser()
@@ -127,11 +128,26 @@ args.add_argument(
     help="The depth of the model",
 )
 args.add_argument(
+    "--dropout",
+    type=float,
+    default=0.1,
+    help="Dropout probability",
+)
+args.add_argument(
     "--model_path",
     type=str,
     help="Path to the model checkpoint to resume training",
 )
+args.add_argument(
+    "--conditionning_model",
+    type=str,
+    default="google-t5/t5-small",
+    help="The conditionning model to use",
+)
 args = args.parse_args()
+
+conditionning_model = T5EncoderModel.from_pretrained(args.conditionning_model)
+tokenizer = AutoTokenizer.from_pretrained(args.conditionning_model)
 
 dataset = load_webdataset(
     args.dataset,
@@ -143,7 +159,14 @@ training_dataloader = DataLoader(
     dataset,
     batch_size=args.batch_size,
     num_workers=os.cpu_count(),
-    collate_fn=collate_fn(args.num_quantizers, args.column_code, args.padding_value),
+    collate_fn=collate_fn(
+        args.num_quantizers,
+        args.column_code,
+        args.column_prompt,
+        conditionning_model,
+        tokenizer,
+        args.padding_value,
+    ),
 )
 
 
@@ -153,6 +176,8 @@ model = Phonira(
     hidden_size=args.hidden_size,
     depth=args.depth,
     padding_token=args.padding_value,
+    dropout_p=args.dropout,
+    proj_dim=conditionning_model.config.d_model,
 )
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=args.betas, eps=1e-8)
@@ -169,6 +194,7 @@ accelerator = Accelerator(
     gradient_accumulation_steps=args.gradient_accumulation_steps, log_with="wandb"
 )
 accelerator.init_trackers(project_name=args.project_name, config=vars(args))
+
 
 model, optimizer, training_dataloader, scheduler = accelerator.prepare(
     model, optimizer, training_dataloader, scheduler
@@ -193,10 +219,16 @@ for epoch in range(args.epochs):
         if (i + 1) * args.batch_size > args.dataset_size:
             break
 
-        x, padding_mask = batch
+        x, padding_mask, prepend_embeds, prepend_mask = batch
 
         with accelerator.accumulate(model):
-            _, loss = model(x, padding_mask=padding_mask, training=True)
+            _, loss = model(
+                x,
+                prepend_embeds,
+                padding_mask=padding_mask,
+                prepend_mask=prepend_mask,
+                training=True,
+            )
             accelerator.backward(loss)
 
             avg_loss += loss.item()
