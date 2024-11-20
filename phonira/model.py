@@ -80,11 +80,9 @@ class MultiHeadAttention(nn.Module):
 
         if is_causal:
             # create a causal mask using the start_pos to avoid masking the prepend tokens
-            pos_token_to_predict = n - start_pos
-            attention_mask[:, :, pos_token_to_predict:, pos_token_to_predict:] = (
-                torch.tril(
-                    attention_mask[:, :, pos_token_to_predict:, pos_token_to_predict:]
-                )
+            attention_mask[:, :, :start_pos, start_pos:] = False
+            attention_mask[:, :, start_pos:, start_pos:] = torch.tril(
+                attention_mask[:, :, start_pos:, start_pos:]
             )
 
         if padding_mask is not None:
@@ -96,6 +94,7 @@ class MultiHeadAttention(nn.Module):
         if self.training:
             dropout_p = self.dropout_p
 
+        # pylint: disable=E1102
         attention = F.scaled_dot_product_attention(
             q_head, k_head, v_head, attn_mask=attention_mask, dropout_p=dropout_p
         )
