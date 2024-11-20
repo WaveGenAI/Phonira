@@ -152,6 +152,7 @@ def collate_fn(
     conditionning_model,
     tokenizer,
     padding_value: int = 1024,
+    max_length: int = 512,
 ):
     """Collate function.
 
@@ -162,6 +163,7 @@ def collate_fn(
         conditionning_model: the conditionning model
         tokenizer: the tokenizer of the conditionning model
         padding_value (int, optional): the padding value. Defaults to 1024.
+        max_length (int, optional): the maximum length. Defaults to 512.
     """
 
     @torch.no_grad()
@@ -202,6 +204,8 @@ def collate_fn(
             [sentence for sentence in sentences],
             return_tensors="pt",
             padding=True,
+            truncation=True,
+            max_length=max_length,
         )
 
         output_embeddings = conditionning_model(

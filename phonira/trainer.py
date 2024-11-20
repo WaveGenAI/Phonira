@@ -144,6 +144,12 @@ args.add_argument(
     default="google-t5/t5-small",
     help="The conditionning model to use",
 )
+args.add_argument(
+    "--max_prompt_length",
+    type=int,
+    default=512,
+    help="The maximum prompt length",
+)
 args = args.parse_args()
 
 conditionning_model = T5EncoderModel.from_pretrained(args.conditionning_model)
@@ -166,6 +172,7 @@ training_dataloader = DataLoader(
         conditionning_model,
         tokenizer,
         args.padding_value,
+        args.max_prompt_length,
     ),
 )
 
