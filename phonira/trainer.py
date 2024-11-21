@@ -194,6 +194,11 @@ model = Phonira(
     proj_dim=conditionning_model.config.d_model,
 )
 
+# weight initialization
+for p in model.parameters():
+    if p.dim() > 1:
+        torch.nn.init.normal_(p, mean=0, std=0.02)
+
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=args.betas, eps=1e-8)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
     optimizer,
