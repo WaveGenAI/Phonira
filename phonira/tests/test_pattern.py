@@ -2,33 +2,9 @@ import random
 
 import torch
 
-from phonira.utils import delay_pattern, reverse_delay_pattern
+from phonira.pattern import DelayPattern
 
-# valid example
-x = torch.tensor(
-    [
-        [
-            [186, 822, 68, 878, 212, 130, 802, 473, 371, 582, 544, 813],
-            [599, 378, 791, 259, 91, 170, 724, 793, 113, 290, 80, 57],
-            [409, 454, 290, 141, 914, 766, 325, 335, 535, 420, 158, 628],
-            [15, 805, 967, 938, 814, 390, 684, 520, 43, 754, 966, 649],
-            [365, 47, 913, 640, 81, 939, 42, 655, 588, 924, 782, 306],
-        ]
-    ],
-)
-
-
-y = torch.tensor(
-    [
-        [
-            [186, 822, 68, 878, 212, 130, 802, 473, 371, 582, 544, 813],
-            [1025, 599, 378, 791, 259, 91, 170, 724, 793, 113, 290, 80],
-            [1025, 1025, 409, 454, 290, 141, 914, 766, 325, 335, 535, 420],
-            [1025, 1025, 1025, 15, 805, 967, 938, 814, 390, 684, 520, 43],
-            [1025, 1025, 1025, 1025, 365, 47, 913, 640, 81, 939, 42, 655],
-        ]
-    ]
-)
+pattern = DelayPattern(1024)
 
 
 def test_full_delay_pattern():
@@ -38,14 +14,37 @@ def test_full_delay_pattern():
         k = random.randint(1, 100)
         n = random.randint(k, 1000)
         x = torch.randint(0, 1024, (1, k, n))
-        out = delay_pattern(x)
-        out = reverse_delay_pattern(out)
+
+        start_pos = random.randint(0, n + 10)
+
+        try:
+            out = pattern.apply_pattern(x, start_pos)
+            out = pattern.reverse_pattern(out, start_pos)
+
+            if start_pos >= n:
+                raise ValueError(
+                    "Start position is greater than the sequence length, should raise an error"
+                )
+
+        except Exception as e:
+            if not (isinstance(e, AssertionError) and start_pos >= n):
+                raise e
+            else:
+                return
+
         assert torch.all(
-            x[..., : out.shape[-1]] == out
+            x[..., : n - k] == out[..., : n - k]
         ), "The delay pattern is not correct"
 
 
 def test_delay_pattern():
     """Test the delay pattern function."""
-    output_tensor = delay_pattern(x)
-    assert torch.all(output_tensor == y), "The delay pattern is not correct"
+
+    a = torch.randint(0, 1023, [1, 9, 10])
+    a[:, :, 0] = 1024
+
+    a = pattern.apply_pattern(a, 1)
+    a_test = pattern.reverse_pattern(a, 1)
+    a_test = pattern.apply_pattern(a_test, 1)
+
+    assert torch.all(a == a_test)

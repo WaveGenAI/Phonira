@@ -3,6 +3,7 @@ import torch.nn as nn
 from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding
 from torch.nn import functional as F
+from tqdm import tqdm
 
 
 class RMSNorm(nn.Module):
@@ -148,6 +149,7 @@ class Phonira(nn.Module):
         depth: int,
         padding_token: int,
         proj_dim: int,
+        delay_pattern,
         dropout_p: float = 0.1,
     ):
         super().__init__()
@@ -179,6 +181,8 @@ class Phonira(nn.Module):
         else:
             self.proj = nn.Identity()
 
+        self.delay_pattern = delay_pattern
+
     def forward(
         self,
         x,
@@ -205,8 +209,11 @@ class Phonira(nn.Module):
         padding_mask = torch.cat([prepend_mask, padding_mask], dim=1)
         x = torch.cat([prepend_embed, x], dim=1)
 
+        if training:
+            padding_mask = padding_mask[:, :-1]
+
         for block in self.decoder_blocks:
-            x = block(x, padding_mask=padding_mask[..., :-1], start_pos=start_pos)
+            x = block(x, padding_mask=padding_mask, start_pos=start_pos)
 
         x = self.rms(x)
 
@@ -232,3 +239,44 @@ class Phonira(nn.Module):
             return x, loss
 
         return x, None
+
+    def generate(
+        self,
+        prepend_embed: torch.Tensor,
+        prepend_mask: torch.Tensor,
+        num_quantizers: int,
+        num_gen: int,
+        padding_value: int = 1024,
+        temperature: int = 1.0,
+        top_k: int = 150,
+    ):
+        assert (
+            num_gen >= num_quantizers
+        ), "num_gen must be greater or equal to num_quantizers"
+
+        x = torch.fill_(
+            torch.empty(
+                1, num_quantizers, 1, dtype=torch.long, device=prepend_embed.device
+            ),
+            padding_value,
+        )
+        for _ in tqdm(range(num_gen), desc="Generating sample"):
+            x = self.delay_pattern.apply_pattern(x, start_pos=1)
+
+            padding_mask = torch.ones_like(x[:, 0, :]).bool()
+            out = self.forward(x, prepend_embed, padding_mask, prepend_mask)[0]
+            out = out[:, :, -1, :]
+
+            out = out / temperature
+            out = F.softmax(out, dim=-1)
+
+            topk_tokens, indices = out.topk(top_k, dim=-1)
+            topk_tokens = topk_tokens.view(-1, top_k)
+
+            samples = torch.multinomial(topk_tokens, 1).unsqueeze(0)
+            indices = torch.gather(indices, -1, samples)
+
+            x = torch.cat([x, indices], dim=-1)
+            x = self.delay_pattern.reverse_pattern(x, start_pos=1)
+
+        return x[..., 1 : x.size(-1) - num_quantizers + 1]

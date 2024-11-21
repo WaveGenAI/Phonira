@@ -2,6 +2,7 @@ import glob
 import os
 
 import torch
+import torch.nn.functional as F
 import webdataset as wds
 from datasets import load_dataset
 from einops import rearrange
@@ -22,6 +23,25 @@ def skip_small_samples(input_key: str, size: int):
         return sample
 
     return _skip_small_samples
+
+
+def delay_mask(x: torch.Tensor, padding_value: int, start_pos: int = 0):
+    """
+    Pad the tensor to follow the delay pattern
+    1, 1, 1, 1
+    1, 1, 1, 1
+    1, 1, 1, 1
+    to
+    0, 1, 1, 1
+    0, 1, 1, 1
+    1, 1, 1, 1
+    """
+    b, k, n = x.shape
+
+    for i in range(k):
+        x[:, : (k - i) - 1, min(i + start_pos, n - 1)] = padding_value
+
+    return x
 
 
 def load_webdataset(
@@ -73,28 +93,6 @@ def load_webdataset(
     return dataset
 
 
-def delay_pattern(x: torch.Tensor, padding_value: int = 1025) -> torch.Tensor:
-    """Delay pattern.
-
-    Args:
-        x (torch.Tensor): the input tensor
-        padding_value (int, optional): the padding value. Defaults to 1025.
-
-    Returns:
-        torch.Tensor: the delayed pattern tensor
-    """
-
-    b, cdbk, n = x.shape
-    assert b == 1, "Batch size must be 1, otherwise use stereo delay pattern"
-
-    out = torch.full_like(x, padding_value)
-
-    for k in range(cdbk):
-        out[:, k, k:n] = x[:, k, : n - k]
-
-    return out
-
-
 def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     """
     Args:
@@ -123,34 +121,13 @@ def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     return expaned_lengths < lengths.unsqueeze(-1)
 
 
-def reverse_delay_pattern(x: torch.Tensor) -> torch.Tensor:
-    """Reverse delay pattern.
-
-    Args:
-        x (torch.Tensor): the input tensor
-
-    Returns:
-        torch.Tensor: the reversed delay pattern tensor
-    """
-
-    b, cdbk, n = x.shape
-    assert b == 1, "Batch size must be 1, otherwise use stereo delay pattern"
-    assert cdbk <= n, "The codebook size must be less than the sequence size"
-
-    out = torch.full_like(x, 1025)
-
-    for k in range(cdbk):
-        out[:, k, : n - k] = x[:, k, k:n]
-
-    return out[:, :, : n - cdbk]
-
-
 def collate_fn(
     num_quantizers: int,
     column_code: str,
     column_prompt: str,
     conditionning_model,
     tokenizer,
+    delay_pattern,
     padding_value: int = 1024,
     max_length: int = 512,
 ):
@@ -162,6 +139,7 @@ def collate_fn(
         column_prompt (str): the column name that contains the prompt
         conditionning_model: the conditionning model
         tokenizer: the tokenizer of the conditionning model
+        delay_pattern : the delay pattern class
         padding_value (int, optional): the padding value. Defaults to 1024.
         max_length (int, optional): the maximum length. Defaults to 512.
     """
@@ -182,7 +160,7 @@ def collate_fn(
         # apply the delay pattern and remove the batch dimension (useless in every case because it correspond to the channel
         # so when delay pattern is applied, there is alway only one channel, for stereo and mono)
         codes = [
-            delay_pattern(code, padding_value).squeeze(0)[:num_quantizers, :]
+            delay_pattern.apply_pattern(code).squeeze(0)[:num_quantizers, :]
             for code in codes
         ]
 
@@ -221,3 +199,50 @@ def collate_fn(
         )
 
     return _collate_fn
+
+
+@torch.no_grad()
+def inference(
+    model,
+    conditionning_model,
+    tokenizer,
+    delay_pattern,
+    prompt: str,
+    num_quantizers: int,
+    num_gen: int,
+    padding_value: int = 1024,
+    temperature: int = 1.0,
+    top_k: int = 150,
+):
+    assert (
+        num_gen >= num_quantizers
+    ), "num_gen must be greater or equal to num_quantizers"
+
+    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+    prepend_embed = conditionning_model(
+        input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"]
+    ).last_hidden_state
+
+    prepend_mask = inputs["attention_mask"].bool()
+
+    x = torch.fill_(torch.empty(1, num_quantizers, 1, dtype=torch.long), padding_value)
+    for _ in range(num_gen):
+        x = delay_pattern.apply_pattern(x, start_pos=1)
+
+        padding_mask = torch.ones_like(x[:, 0, :]).bool()
+        out = model(x, prepend_embed, padding_mask, prepend_mask)[0]
+        out = out[:, :, -1, :]
+
+        out = out / temperature
+        out = F.softmax(out, dim=-1)
+
+        topk_tokens, indices = out.topk(top_k, dim=-1)
+        topk_tokens = topk_tokens.view(-1, top_k)
+
+        samples = torch.multinomial(topk_tokens, 1).unsqueeze(0)
+        indices = torch.gather(indices, -1, samples)
+
+        x = torch.cat([x, indices], dim=-1)
+        x = delay_pattern.reverse_pattern(x, start_pos=1)
+
+    return x[..., 1 : x.size(-1) - num_quantizers + 1]

@@ -6,3 +6,4 @@ soundstorm-pytorch
 descript-audio-codec
 pytest
 rotary-embedding-torch
+tqdm

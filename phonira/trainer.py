@@ -1,4 +1,5 @@
 import os
+import tempfile
 import time
 from argparse import ArgumentParser
 
@@ -6,11 +7,13 @@ import dac
 import torch
 from accelerate import Accelerator
 from audiotools import AudioSignal
-from einops import rearrange
 from model import Phonira
+from pattern import DelayPattern
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, T5EncoderModel
 from utils import collate_fn, load_webdataset, skip_small_samples
+
+import wandb
 
 args = ArgumentParser()
 args.add_argument(
@@ -161,6 +164,9 @@ dataset = load_webdataset(
     map_func=skip_small_samples(args.column_code, max(args.num_quantizers, 20)),
 )
 
+
+pattern_manager = DelayPattern(args.padding_value)
+
 training_dataloader = DataLoader(
     dataset,
     batch_size=args.batch_size,
@@ -171,11 +177,11 @@ training_dataloader = DataLoader(
         args.column_prompt,
         conditionning_model,
         tokenizer,
+        pattern_manager,
         args.padding_value,
         args.max_prompt_length,
     ),
 )
-
 
 model = Phonira(
     num_quantizers=args.num_quantizers,
@@ -184,6 +190,7 @@ model = Phonira(
     depth=args.depth,
     padding_token=args.padding_value,
     dropout_p=args.dropout,
+    delay_pattern=pattern_manager,
     proj_dim=conditionning_model.config.d_model,
 )
 
@@ -203,8 +210,8 @@ accelerator = Accelerator(
 accelerator.init_trackers(project_name=args.project_name, config=vars(args))
 
 
-model, optimizer, training_dataloader, scheduler = accelerator.prepare(
-    model, optimizer, training_dataloader, scheduler
+model, optimizer, scheduler, training_dataloader = accelerator.prepare(
+    model, optimizer, scheduler, training_dataloader
 )
 
 accelerator.register_for_checkpointing(scheduler)
@@ -255,7 +262,26 @@ for epoch in range(args.epochs):
 
         # logging section
         accelerator.log({"train_loss": loss.item(), "lr": scheduler.get_last_lr()[0]})
-        if (i // args.gradient_accumulation_steps) % args.log_interval == 0:
+        if (i / args.gradient_accumulation_steps) % args.log_interval == 0:
             accelerator.save_state(output_dir=args.output_dir)
+
+            input_embeds = prepend_embeds[0].unsqueeze(0)
+            input_mask = prepend_mask[0].unsqueeze(0)
+
+            with torch.no_grad():
+                model.eval()
+                audio = model.generate(
+                    input_embeds, input_mask, args.num_quantizers, 864
+                )
+                model.train()
+
+                audio = model_dac.quantizer.from_codes(audio)[0]
+                audio = model_dac.decode(audio).squeeze(1)
+
+                audio = AudioSignal(audio.cpu(), sample_rate=44100)
+
+                with tempfile.NamedTemporaryFile(suffix=".wav") as f:
+                    audio.write(f.name)
+                    accelerator.log({"audio": wandb.Audio(f.name, caption="test")})
 
 accelerator.end_training()
