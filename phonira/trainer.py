@@ -269,7 +269,9 @@ for epoch in range(args.epochs):
             prepend_embed = prepend_embeds[0].unsqueeze(0)
             prepend_mask = prepend_mask[0].unsqueeze(0)
 
-            prompt = tokenizer.decode(prompt_input["input_ids"][0])
+            prompt = tokenizer.decode(
+                prompt_input["input_ids"][0], skip_special_tokens=True
+            )
 
             with torch.no_grad():
                 model.eval()
