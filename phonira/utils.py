@@ -195,54 +195,7 @@ def collate_fn(
             codes_stacked,
             padding_maks,
             output_embeddings.last_hidden_state,
-            inputs["attention_mask"].bool(),
+            inputs,
         )
 
     return _collate_fn
-
-
-@torch.no_grad()
-def inference(
-    model,
-    conditionning_model,
-    tokenizer,
-    delay_pattern,
-    prompt: str,
-    num_quantizers: int,
-    num_gen: int,
-    padding_value: int = 1024,
-    temperature: int = 1.0,
-    top_k: int = 150,
-):
-    assert (
-        num_gen >= num_quantizers
-    ), "num_gen must be greater or equal to num_quantizers"
-
-    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-    prepend_embed = conditionning_model(
-        input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"]
-    ).last_hidden_state
-
-    prepend_mask = inputs["attention_mask"].bool()
-
-    x = torch.fill_(torch.empty(1, num_quantizers, 1, dtype=torch.long), padding_value)
-    for _ in range(num_gen):
-        x = delay_pattern.apply_pattern(x, start_pos=1)
-
-        padding_mask = torch.ones_like(x[:, 0, :]).bool()
-        out = model(x, prepend_embed, padding_mask, prepend_mask)[0]
-        out = out[:, :, -1, :]
-
-        out = out / temperature
-        out = F.softmax(out, dim=-1)
-
-        topk_tokens, indices = out.topk(top_k, dim=-1)
-        topk_tokens = topk_tokens.view(-1, top_k)
-
-        samples = torch.multinomial(topk_tokens, 1).unsqueeze(0)
-        indices = torch.gather(indices, -1, samples)
-
-        x = torch.cat([x, indices], dim=-1)
-        x = delay_pattern.reverse_pattern(x, start_pos=1)
-
-    return x[..., 1 : x.size(-1) - num_quantizers + 1]

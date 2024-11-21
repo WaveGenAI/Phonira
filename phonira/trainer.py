@@ -233,7 +233,8 @@ for epoch in range(args.epochs):
         if (i + 1) * args.batch_size > args.dataset_size:
             break
 
-        x, padding_mask, prepend_embeds, prepend_mask = batch
+        x, padding_mask, prepend_embeds, prompt_input = batch
+        prepend_mask = prompt_input["attention_mask"].bool()
 
         with accelerator.accumulate(model):
             _, loss = model(
@@ -265,23 +266,25 @@ for epoch in range(args.epochs):
         if (i / args.gradient_accumulation_steps) % args.log_interval == 0:
             accelerator.save_state(output_dir=args.output_dir)
 
-            input_embeds = prepend_embeds[0].unsqueeze(0)
-            input_mask = prepend_mask[0].unsqueeze(0)
+            prepend_embed = prepend_embeds[0].unsqueeze(0)
+            prepend_mask = prepend_mask[0].unsqueeze(0)
+
+            prompt = tokenizer.decode(prompt_input["input_ids"][0])
 
             with torch.no_grad():
                 model.eval()
                 audio = model.generate(
-                    input_embeds, input_mask, args.num_quantizers, 864
+                    prepend_embed, prepend_mask, args.num_quantizers, 864
                 )
                 model.train()
 
                 audio = model_dac.quantizer.from_codes(audio)[0]
                 audio = model_dac.decode(audio).squeeze(1)
 
-                audio = AudioSignal(audio.cpu(), sample_rate=44100)
+                audio = AudioSignal(audio.cpu(), sample_rate=model_dac.sample_rate)
 
                 with tempfile.NamedTemporaryFile(suffix=".wav") as f:
                     audio.write(f.name)
-                    accelerator.log({"audio": wandb.Audio(f.name, caption="test")})
+                    accelerator.log({"audio": wandb.Audio(f.name, caption=prompt)})
 
 accelerator.end_training()
