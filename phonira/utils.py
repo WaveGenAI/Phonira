@@ -25,25 +25,6 @@ def skip_small_samples(input_key: str, size: int):
     return _skip_small_samples
 
 
-def delay_mask(x: torch.Tensor, padding_value: int, start_pos: int = 0):
-    """
-    Pad the tensor to follow the delay pattern
-    1, 1, 1, 1
-    1, 1, 1, 1
-    1, 1, 1, 1
-    to
-    0, 1, 1, 1
-    0, 1, 1, 1
-    1, 1, 1, 1
-    """
-    b, k, n = x.shape
-
-    for i in range(k):
-        x[:, : (k - i) - 1, min(i + start_pos, n - 1)] = padding_value
-
-    return x
-
-
 def load_webdataset(
     dataset_name: str, split_name: str, map_func: callable = None, shuffle: bool = True
 ) -> wds.WebDataset:
