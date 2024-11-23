@@ -132,6 +132,12 @@ args.add_argument(
     help="The depth of the model",
 )
 args.add_argument(
+    "--num_heads",
+    type=int,
+    default=8,
+    help="The number of heads in the model",
+)
+args.add_argument(
     "--dropout",
     type=float,
     default=0.1,
@@ -197,6 +203,7 @@ model = Phonira(
     padding_token=args.padding_value,
     dropout_p=args.dropout,
     delay_pattern=pattern_manager,
+    num_heads=args.num_heads,
     proj_dim=conditionning_model.config.d_model,
 )
 

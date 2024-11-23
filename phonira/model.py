@@ -107,7 +107,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, hidden_size: int, num_head: int = 8, dropout_p: float = 0.1):
+    def __init__(self, hidden_size: int, num_heads: int = 8, dropout_p: float = 0.1):
         super().__init__()
 
         self.rms1 = RMSNorm(hidden_size)
@@ -115,7 +115,7 @@ class DecoderBlock(nn.Module):
 
         self.dropout = nn.Dropout(dropout_p)
 
-        self.mha = MultiHeadAttention(hidden_size, num_head, dropout_p)
+        self.mha = MultiHeadAttention(hidden_size, num_heads, dropout_p)
 
         ff_dim = int((hidden_size * 4) * (2 / 3))
         self.feed_forward = FFNSwiGLU(hidden_size, ff_dim, dropout_p)
@@ -150,6 +150,7 @@ class Phonira(nn.Module):
         padding_token: int,
         proj_dim: int,
         delay_pattern,
+        num_heads: int,
         dropout_p: float = 0.1,
     ):
         super().__init__()
@@ -163,7 +164,10 @@ class Phonira(nn.Module):
         )
 
         self.decoder_blocks = nn.ModuleList(
-            [DecoderBlock(hidden_size, dropout_p=dropout_p) for _ in range(depth)]
+            [
+                DecoderBlock(hidden_size, num_heads=num_heads, dropout_p=dropout_p)
+                for _ in range(depth)
+            ]
         )
 
         self.heads = nn.ModuleList(
