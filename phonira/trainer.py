@@ -9,6 +9,7 @@ from accelerate import Accelerator
 from audiotools import AudioSignal
 from model import Phonira
 from pattern import DelayPattern
+from safetensors.torch import load_model
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, T5EncoderModel
 from utils import collate_fn, load_webdataset, skip_small_samples
@@ -153,6 +154,11 @@ args.add_argument(
     default=512,
     help="The maximum prompt length",
 )
+args.add_argument(
+    "--resume",
+    action="store_true",
+    help="Resume training",
+)
 args = args.parse_args()
 
 conditionning_model = T5EncoderModel.from_pretrained(args.conditionning_model)
@@ -221,7 +227,11 @@ model, optimizer, scheduler, training_dataloader = accelerator.prepare(
 
 accelerator.register_for_checkpointing(scheduler)
 if args.model_path:
-    accelerator.load_state(args.model_path)
+    if args.resume:
+        accelerator.load_state(args.model_path)
+    else:
+        load_model(model, os.path.join(args.model_path, "model.safetensors"))
+
 
 model.train()
 
