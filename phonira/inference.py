@@ -1,20 +1,13 @@
-import os
-import tempfile
-import time
 from argparse import ArgumentParser
 
 import dac
+import gradio as gr
 import torch
-from accelerate import Accelerator
 from audiotools import AudioSignal
 from model import Phonira
 from pattern import DelayPattern
 from safetensors.torch import load_model
-from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, T5EncoderModel
-from utils import collate_fn, load_webdataset, skip_small_samples
-
-import wandb
 
 args = ArgumentParser()
 
@@ -59,12 +52,16 @@ args.add_argument(
     default=8,
     help="The number of heads in the model",
 )
-
 args.add_argument(
     "--conditionning_model",
     type=str,
     default="google-t5/t5-small",
     help="The conditionning model to use",
+)
+args.add_argument(
+    "--share",
+    action="store_true",
+    help="Share the application",
 )
 args = args.parse_args()
 
@@ -100,7 +97,13 @@ model.to(device)
 
 
 @torch.no_grad()
-def generate(prompt: str):
+def generate(
+    prompt: str,
+    duration: int,
+    temperature: float = 1.0,
+    top_k: int = 150,
+    guidance_scale: float = 3.0,
+):
     inputs = tokenizer(
         [prompt],
         return_tensors="pt",
@@ -121,15 +124,52 @@ def generate(prompt: str):
         prepend_embed.to(device),
         prepend_mask.to(device),
         args.num_quantizers,
-        864,
+        duration,
+        temperature=temperature,
+        top_k=top_k,
+        guidance_scale=guidance_scale,
     )
+
     audio = model_dac.quantizer.from_codes(audio)[0]
     audio = model_dac.decode(audio).squeeze(1)
 
     audio_signal = AudioSignal(audio.cpu(), sample_rate=model_dac.sample_rate)
-    audio_signal.write("output.wav")
+
+    return audio_signal.audio_data
 
 
-generate(
-    "A smooth Reggae track with emotional vocals, featuring a pulsing 104 BPM drum machine beat, filtered synths, lush electric piano, and soaring strings, with an intimate mood."
+def gradio_generate(
+    prompt,
+    duration,
+    temperature: float = 1.0,
+    top_k: int = 150,
+    guidance_scale: float = 3.0,
+):
+    audio = generate(prompt, duration, temperature, top_k, guidance_scale)
+    sample_rate = model_dac.sample_rate
+    return (sample_rate, audio.numpy())
+
+
+demo = gr.Interface(
+    fn=lambda prompt, duration, temperature, top_k, guidance_scale: gradio_generate(
+        prompt, duration * 86, temperature, top_k, guidance_scale
+    ),
+    inputs=[
+        gr.Textbox(lines=3, placeholder="Enter your prompt here..."),
+        gr.Slider(
+            minimum=1, maximum=30, value=10, step=1, label="Audio Duration (seconds)"
+        ),
+        gr.Slider(minimum=0.1, maximum=2.0, value=1, step=0.1, label="Temperature"),
+        gr.Slider(minimum=1, maximum=300, value=150, step=1, label="Top K"),
+        gr.Slider(
+            minimum=0.1, maximum=10.0, value=3.0, step=0.1, label="Guidance Scale"
+        ),
+    ],
+    outputs=gr.Audio(type="numpy", label="Generated audio"),
+    title="WaveAI Music Generator",
+    description="Enter a text prompt and select the audio duration to generate a matching music clip.",
 )
+
+
+if __name__ == "__main__":
+    demo.launch(share=args.share)

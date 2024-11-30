@@ -7,3 +7,4 @@ descript-audio-codec
 pytest
 rotary-embedding-torch
 tqdm
+gradio
