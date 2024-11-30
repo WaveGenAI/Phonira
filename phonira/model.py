@@ -190,7 +190,7 @@ class Phonira(nn.Module):
     def forward(
         self,
         x,
-        prepend_embed: torch.Tensor,
+        prepend_embed: torch.Tensor = None,
         padding_mask: torch.Tensor = None,
         prepend_mask: torch.Tensor = None,
         training=False,
@@ -203,15 +203,17 @@ class Phonira(nn.Module):
             y = x[..., 1:]
             x = x[..., :-1]
 
-        prepend_embed = self.proj(prepend_embed)
-
+        start_pos = 0
         x = sum([embd(x[:, i, :]) for i, embd in enumerate(self.embeddings)])
         x = self.dropout(x)
 
-        # prepend embeddings
-        start_pos = prepend_embed.size(1)
-        padding_mask = torch.cat([prepend_mask, padding_mask], dim=1)
-        x = torch.cat([prepend_embed, x], dim=1)
+        if prepend_embed is not None:
+            prepend_embed = self.proj(prepend_embed)
+
+            # prepend embeddings
+            start_pos = prepend_embed.size(1)
+            padding_mask = torch.cat([prepend_mask, padding_mask], dim=1)
+            x = torch.cat([prepend_embed, x], dim=1)
 
         if training:
             padding_mask = padding_mask[:, :-1]
@@ -253,6 +255,7 @@ class Phonira(nn.Module):
         padding_value: int = 1024,
         temperature: int = 1.0,
         top_k: int = 150,
+        guidance_scale: float = 3.0,
     ):
         assert (
             num_gen >= num_quantizers
@@ -266,13 +269,25 @@ class Phonira(nn.Module):
         )
         for _ in tqdm(range(num_gen), desc="Generating sample"):
             x = self.delay_pattern.apply_pattern(x, start_pos=1)
-
             padding_mask = torch.ones_like(x[:, 0, :]).bool()
+
             out = self.forward(x, prepend_embed, padding_mask, prepend_mask)[0]
             out = out[:, :, -1, :]
 
+            out_uncond = self.forward(x, None, padding_mask, None)[0]
+            out_uncond = out_uncond[:, :, -1, :]
+
             out = out / temperature
-            out = F.softmax(out, dim=-1)
+            out_uncond = out_uncond / temperature
+
+            out = F.log_softmax(out, dim=-1)
+            out_uncond = F.log_softmax(out_uncond, dim=-1)
+
+            # Apply classifier-free guidance
+            out = out_uncond + guidance_scale * (out - out_uncond)
+
+            # convert to probabilities
+            out = out.exp()
 
             topk_tokens, indices = out.topk(top_k, dim=-1)
             topk_tokens = topk_tokens.view(-1, top_k)

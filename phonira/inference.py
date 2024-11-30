@@ -130,4 +130,6 @@ def generate(prompt: str):
     audio_signal.write("output.wav")
 
 
-generate("a EDM music with a lot of bass")
+generate(
+    "A smooth Reggae track with emotional vocals, featuring a pulsing 104 BPM drum machine beat, filtered synths, lush electric piano, and soaring strings, with an intimate mood."
+)
