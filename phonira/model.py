@@ -234,7 +234,7 @@ class Phonira(nn.Module):
                 target = y[:, i].flatten()
 
                 # replace padding token with -100
-                target[target == self._pad_token] = -100
+                target = torch.where(target == self._pad_token, -100, target)
 
                 loss += loss_fc(logits_loss, target)
 
