@@ -68,7 +68,6 @@ args = args.parse_args()
 conditionning_model = T5EncoderModel.from_pretrained(args.conditionning_model)
 tokenizer = AutoTokenizer.from_pretrained(args.conditionning_model)
 
-
 pattern_manager = DelayPattern(args.padding_value)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

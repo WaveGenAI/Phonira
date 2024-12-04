@@ -49,7 +49,11 @@ class MultiHeadAttention(nn.Module):
         self.w_v = nn.Linear(hidden_size, hidden_size, bias=False)
 
         self.w_out = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads)
+
+        # https://github.com/lucidrains/rotary-embedding-torch/issues/37
+        self.rotary_emb = RotaryEmbedding(
+            dim=hidden_size // num_heads, cache_if_possible=False
+        )
         self.num_heads = num_heads
         self.dropout_p = dropout_p
 
@@ -287,7 +291,7 @@ class Phonira(nn.Module):
             out = out_uncond + guidance_scale * (out - out_uncond)
 
             # convert to probabilities
-            out = out.exp()
+            out = F.softmax(out, dim=-1)
 
             topk_tokens, indices = out.topk(top_k, dim=-1)
             topk_tokens = topk_tokens.view(-1, top_k)
