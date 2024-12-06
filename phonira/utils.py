@@ -45,7 +45,7 @@ def load_webdataset(
         org, dataset_name = dataset_name.split("/")
         n_shards = dataset[split_name].n_shards
 
-        url = f"https://huggingface.co/datasets/{org}/{dataset_name}/resolve/main/data/{split_name}-{{000000..{n_shards - 1}}}.tar"
+        url = f"https://huggingface.co/datasets/{org}/{dataset_name}/resolve/main/{split_name}-{{000000..{n_shards - 1}}}.tar"
         url = f"pipe:curl --connect-timeout 30 --retry 30 --retry-delay 2 -f -s -L {url} -H 'Authorization:Bearer {get_token()}'"
     else:
         n_shards = len(glob.glob(os.path.join(dataset_name, f"{split_name}*.tar")))
