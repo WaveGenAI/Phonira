@@ -218,7 +218,7 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
     T_max=(
         args.epochs
         * args.dataset_size
-        // (args.gradient_accumulation_steps * args.batch_size)
+        // (args.gradient_accumulation_steps * args.batch_size + 1e-6)
     ),
 )
 
