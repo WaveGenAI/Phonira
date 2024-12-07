@@ -18,9 +18,12 @@ def skip_small_samples(input_key: str, size: int):
     """
 
     def _skip_small_samples(sample):
-        if sample[input_key].shape[-1] < size:
+        try:
+            if sample[input_key].shape[-1] < size:
+                return None
+            return sample
+        except KeyError:
             return None
-        return sample
 
     return _skip_small_samples
 
