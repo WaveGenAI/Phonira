@@ -18,14 +18,33 @@ def skip_small_samples(input_key: str, size: int):
     """
 
     def _skip_small_samples(sample):
-        try:
-            if sample[input_key].shape[-1] < size:
-                return None
-            return sample
-        except KeyError:
+        if sample[input_key].shape[-1] < size:
             return None
+        return sample
 
     return _skip_small_samples
+
+
+def _validate_data():
+    """Validate data.
+
+    Returns:
+        callable: the validation function
+    """
+
+    data = None
+
+    def _validate(sample):
+        nonlocal data
+        if data is None:
+            data = sample
+
+        if data.keys() != sample.keys():
+            return None
+
+        return sample
+
+    return _validate
 
 
 def load_webdataset(
@@ -62,6 +81,7 @@ def load_webdataset(
             wds.split_by_worker,
             wds.tarfile_to_samples(handler=wds.warn_and_stop),
             wds.decode(),
+            wds.map(_validate_data()),
             wds.map(map_func) if map_func else None,
         )
     else:
@@ -71,6 +91,7 @@ def load_webdataset(
             wds.split_by_worker,
             wds.tarfile_to_samples(handler=wds.warn_and_stop),
             wds.decode(),
+            wds.map(_validate_data()),
             wds.map(map_func) if map_func else None,
         )
 
